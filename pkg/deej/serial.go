@@ -238,7 +238,7 @@ func (sio *SerialIO) handleLine(logger *zap.SugaredLogger, line string) {
 	// trim the suffix
 	line = strings.TrimSuffix(line, "\r\n")
 
-	// split on pipe (|), this gives a slice of numerical strings between "0" and "1023"
+	// split on pipe (|), this gives a slice of numerical strings between "0" and "4095"
 	splitLine := strings.Split(line, "|")
 	numSliders := len(splitLine)
 
@@ -258,18 +258,18 @@ func (sio *SerialIO) handleLine(logger *zap.SugaredLogger, line string) {
 	moveEvents := []SliderMoveEvent{}
 	for sliderIdx, stringValue := range splitLine {
 
-		// convert string values to integers ("1023" -> 1023)
+		// convert string values to integers ("4095" -> 4095)
 		number, _ := strconv.Atoi(stringValue)
 
 		// turns out the first line could come out dirty sometimes (i.e. "4558|925|41|643|220")
 		// so let's check the first number for correctness just in case
-		if sliderIdx == 0 && number > 1023 {
+		if sliderIdx == 0 && number > 4095 {
 			sio.logger.Debugw("Got malformed line from serial, ignoring", "line", line)
 			return
 		}
 
 		// map the value from raw to a "dirty" float between 0 and 1 (e.g. 0.15451...)
-		dirtyFloat := float32(number) / 1023.0
+		dirtyFloat := float32(number) / 4095.0
 
 		// normalize it to an actual volume scalar between 0.0 and 1.0 with 2 points of precision
 		normalizedScalar := util.NormalizeScalar(dirtyFloat)
