@@ -119,7 +119,44 @@ func (m *sessionMap) getAndAddSessions() error {
 
 	m.logger.Infow("Got all audio sessions successfully", "sessionMap", m)
 
+	// inform the hardware which sessions are currently mapped to its sliders,
+	// so it can display them. this is the single point where the map is (re)populated,
+	// so it covers initialization, config reloads and slider-driven refreshes alike
+	m.deej.serial.PublishSessionMap(m.mappedSessionKeys())
+
 	return nil
+}
+
+// mappedSessionKeys returns a deduplicated, slider-ordered list of the session
+// keys that are both mapped to a slider in the config and currently live in the
+// session map (i.e. the process is actually running). this is what we report to
+// the hardware over serial.
+func (m *sessionMap) mappedSessionKeys() []string {
+	keys := []string{}
+	seen := map[string]bool{}
+
+	m.deej.config.SliderMapping.iterate(func(sliderIdx int, targets []string) {
+		for _, target := range targets {
+
+			// resolve special transforms (e.g. deej.current) into concrete keys
+			for _, resolvedTarget := range m.resolveTarget(target) {
+
+				if seen[resolvedTarget] {
+					continue
+				}
+
+				// only report targets that have at least one live session behind them
+				if _, ok := m.get(resolvedTarget); !ok {
+					continue
+				}
+
+				seen[resolvedTarget] = true
+				keys = append(keys, resolvedTarget)
+			}
+		}
+	})
+
+	return keys
 }
 
 func (m *sessionMap) setupOnConfigReload() {
@@ -162,9 +199,12 @@ func (m *sessionMap) refreshSessions(force bool) {
 
 	if err := m.getAndAddSessions(); err != nil {
 		m.logger.Warnw("Failed to re-acquire all audio sessions", "error", err)
+		return
 	} else {
 		m.logger.Debug("Re-acquired sessions successfully")
 	}
+
+	// note: getAndAddSessions publishes the updated map over serial for us
 }
 
 // returns true if a session is not currently mapped to any slider, false otherwise

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jacobsa/go-serial/serial"
@@ -28,6 +29,7 @@ type SerialIO struct {
 	connected   bool
 	connOptions serial.OpenOptions
 	conn        io.ReadWriteCloser
+	writeLock   sync.Mutex
 
 	lastKnownNumSliders        int
 	currentSliderPercentValues []float32
@@ -144,6 +146,34 @@ func (sio *SerialIO) SubscribeToSliderMoveEvents() chan SliderMoveEvent {
 	sio.sliderMoveConsumers = append(sio.sliderMoveConsumers, ch)
 
 	return ch
+}
+
+// PublishSessionMap sends the currently mapped session keys over the serial
+// connection as a single comma-separated line, e.g. "chrome.exe,spotify.exe,master\n".
+// this lets the hardware (e.g. a TFT display) show which sessions are bound to its sliders.
+func (sio *SerialIO) PublishSessionMap(sessionKeys []string) {
+
+	// nothing to send to if we're not connected to the hardware yet
+	if !sio.connected || sio.conn == nil {
+		return
+	}
+
+	// build the line: "<session 1>,<session 2>,<session 3>\n"
+	line := strings.Join(sessionKeys, ",") + "\n"
+
+	// guard against concurrent writes - refreshSessions can be triggered from
+	// both the config-reload and slider-move goroutines
+	sio.writeLock.Lock()
+	defer sio.writeLock.Unlock()
+
+	if _, err := sio.conn.Write([]byte(line)); err != nil {
+		sio.logger.Warnw("Failed to write session map to serial", "error", err)
+		return
+	}
+
+	if sio.deej.Verbose() {
+		sio.logger.Debugw("Published session map to serial", "line", strings.TrimSuffix(line, "\n"))
+	}
 }
 
 func (sio *SerialIO) setupOnConfigReload() {
